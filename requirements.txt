@@ -1,0 +1,6 @@
+streamlit
+google-genai
+selenium
+selenium-stealth
+python-docx
+pandas
