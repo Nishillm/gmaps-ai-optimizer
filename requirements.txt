@@ -1,6 +1,8 @@
 streamlit
+pandas
 google-genai
+requests
+beautifulsoup4
 selenium
 selenium-stealth
-python-docx
-pandas
+webdriver-manager
