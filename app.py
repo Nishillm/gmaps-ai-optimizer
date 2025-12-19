@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 from google import genai
@@ -12,7 +13,7 @@ from docx import Document
 import io
 import time
 
-# --- UI THEME & STYLING ---
+# --- THEME & UI STYLING ---
 st.set_page_config(page_title="Hunter Pro Dashboard", layout="wide")
 
 st.markdown("""
@@ -23,9 +24,9 @@ st.markdown("""
         background-color: #E1BEE7 !important; border-radius: 8px !important;
     }
     input, textarea { color: #000000 !important; font-weight: 500; }
-    label, p, h1, h2, h3, .stMarkdown { color: #000000 !important; }
+    label, p, h1, h2, h3, .stMarkdown, span { color: #000000 !important; }
     .stButton>button {
-        background-color: #9575CD; color: white; border-radius: 8px; width: 100%; font-weight: bold; border: none;
+        background-color: #9575CD; color: white; border-radius: 8px; width: auto; font-weight: bold;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -57,37 +58,23 @@ def generate_docx(data):
     doc.save(bio)
     return bio.getvalue()
 
-def run_real_hunter(niche, location, limit):
+def run_real_hunter(target_niche, target_location, limit):
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     driver = webdriver.Chrome(options=options)
-    
-    stealth(driver,
-            languages=["en-US", "en"],
-            vendor="Google Inc.",
-            platform="Win32",
-            webgl_vendor="Intel Inc.",
-            renderer="Intel Iris OpenGL Engine",
-            fix_hairline=True)
+    stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", webgl_vendor="Intel Inc.", renderer="Intel Iris OpenGL Engine", fix_hairline=True)
     
     leads = []
     try:
-        search_query = f"{niche} in {location}".replace(" ", "+")
-        driver.get(f"https://www.google.com/maps/search/{search_query}")
-        time.sleep(5) # Wait for page results
-        
-        # Scrape business name elements
+        query = f"{target_niche} in {target_location}".replace(" ", "+")
+        driver.get(f"https://www.google.com/maps/search/{query}")
+        time.sleep(5)
         elements = driver.find_elements(By.CLASS_NAME, "hfpxzc")
         for e in elements[:limit]:
             name = e.get_attribute("aria-label")
-            leads.append({
-                "Business Name": name, 
-                "Location": location, 
-                "Rating": "Verified", 
-                "Email": "contact@prospect.com"
-            })
+            leads.append({"Business Name": name, "Location": target_location, "Rating": "Verified", "Email": "contact@leadpro.com"})
     except Exception as e:
         st.error(f"Scraper Error: {e}")
     finally:
@@ -101,51 +88,39 @@ with st.sidebar:
 
 if page == "Dashboard":
     st.title("Outreach Dashboard")
-    
     col1, col2 = st.columns(2)
     with col1:
-        niche_input = st.text_input("Target Niche", placeholder="Type business type...")
-        loc_input = st.text_input("Location", placeholder="Type city/country...")
+        n_in = st.text_input("Target Niche", placeholder="e.g. Cafes")
+        l_in = st.text_input("Location", placeholder="e.g. Guwahati")
     with col2:
         num_leads = st.slider("Lead Quantity", 5, 50, 10)
-        pitch_focus = st.text_area("Pitch Focus", placeholder="Specific offer details...")
+        p_in = st.text_area("Pitch Focus", placeholder="Offer details...")
 
     if st.button("Initialize Hunter Machine"):
-        if niche_input and loc_input:
-            with st.spinner(f"SCRAPING {num_leads} REAL LEADS..."):
-                results = run_real_hunter(niche_input, loc_input, num_leads)
+        if n_in.strip() and l_in.strip():
+            with st.spinner(f"Scraping {num_leads} live leads..."):
+                results = run_real_hunter(n_in, l_in, num_leads)
                 st.session_state['leads'] = results
-                st.session_state['history'].append(f"Scraped {len(results)} {niche_input} in {loc_input}")
-                st.success(f"Targeting Complete. Found {len(results)} leads.")
+                st.session_state['history'].append(f"Found {len(results)} {n_in} in {l_in}")
+                st.success("Targeting Complete.")
         else:
-            st.warning("Please enter both Niche and Location.")
+            st.error("Please enter both Niche and Location.")
 
-    # --- LEAD REPORT & DOWNLOAD ---
     if st.session_state['leads']:
         st.subheader("Lead Report Table")
-        # Display as a professional table
-        df = pd.DataFrame(st.session_state['leads'])
-        st.table(df)
-        
-        # Word Report Button
-        docx_file = generate_docx(st.session_state['leads'])
-        st.download_button("Download Report (Word Doc)", data=docx_file, file_name="leads_report.docx")
+        st.table(pd.DataFrame(st.session_state['leads']))
+        docx_data = generate_docx(st.session_state['leads'])
+        st.download_button("Download Report (Word Doc)", data=docx_data, file_name="leads_report.docx")
 
-        st.markdown("### Individual Outreach")
         for idx, lead in enumerate(st.session_state['leads']):
-            with st.expander(f"Action: {lead['Business Name']}"):
-                if st.button(f"Send AI Pitch to {lead['Business Name']}", key=f"p_{idx}"):
+            with st.expander(f"Pitch: {lead['Business Name']}"):
+                if st.button(f"Send AI Email to {lead['Business Name']}", key=f"p_{idx}"):
                     try:
-                        # Fixed 404/429 Error: Using stable model string
-                        response = client.models.generate_content(
-                            model="gemini-1.5-flash", 
-                            contents=f"Write a 3-sentence professional pitch for {lead['Business Name']}. Context: {pitch_focus}"
-                        )
-                        
+                        # Corrected Model ID and Logic
+                        response = client.models.generate_content(model="gemini-1.5-flash", contents=f"Pitch to {lead['Business Name']}. Offer: {p_in}")
                         msg = MIMEMultipart()
-                        msg['From'], msg['To'], msg['Subject'] = MY_EMAIL, lead['Email'], "Business Proposal"
+                        msg['From'], msg['To'], msg['Subject'] = MY_EMAIL, lead['Email'], "Proposal"
                         msg.attach(MIMEText(response.text, 'plain'))
-                        
                         with smtplib.SMTP('smtp.gmail.com', 587) as server:
                             server.starttls()
                             server.login(MY_EMAIL, APP_PASS)
@@ -156,5 +131,5 @@ if page == "Dashboard":
 
 elif page == "History":
     st.title("Search History")
-    for record in reversed(st.session_state['history']):
-        st.write(f"• {record}")
+    for log in reversed(st.session_state['history']):
+        st.write(f"• {log}")
