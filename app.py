@@ -1,123 +1,115 @@
 import streamlit as st
 import pandas as pd
+import re
+import requests
+import time
 from google import genai
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium_stealth import stealth
-from docx import Document
-import io
-import time
 
-# --- UI THEME (UNCHANGED) ---
-st.set_page_config(page_title="Hunter Pro Dashboard", layout="wide")
-st.markdown("""
-    <style>
-    .stApp { background-color: #FFFFFF; }
-    [data-testid="stSidebar"] { background-color: #FCE4EC !important; }
-    div[data-baseweb="input"] > div, div[data-baseweb="textarea"] > div {
-        background-color: #E1BEE7 !important; border-radius: 8px !important;
-    }
-    input, textarea { color: #000000 !important; font-weight: 500; }
-    label, p, h1, h2, h3, .stMarkdown, span { color: #000000 !important; }
-    .stButton>button {
-        background-color: #9575CD; color: white; border-radius: 8px; width: auto; font-weight: bold;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# --- 1. INITIALIZATION ---
+st.set_page_config(page_title="Hunter Pro 2025", layout="wide")
 
-# --- LOAD SECRETS FROM DASHBOARD ---
 try:
+    # IMPORTANT: The new SDK (google-genai) automatically handles the endpoint
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-    MY_EMAIL = st.secrets["MY_GMAIL"]
-    APP_PASS = st.secrets["GMAIL_APP_PASSWORD"]
 except Exception as e:
-    st.error("Secrets not found! Check your Streamlit Cloud 'Secrets' tab.")
+    st.error("Missing API Key in Streamlit Secrets!")
 
-# --- SCRAPER WITH SCROLLING TO FIX LEAD COUNT ---
-def run_real_hunter(niche, location, limit):
+# --- 2. TOOL: THE EMAIL CRAWLER ---
+def crawl_website_for_email(url):
+    """Visits the business website to find hidden emails."""
+    if not url or "http" not in url:
+        return "No Website"
+    try:
+        response = requests.get(url, timeout=8, headers={'User-Agent': 'Mozilla/5.0'})
+        # Search for email patterns using Regex
+        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', response.text)
+        return list(set(emails))[0] if emails else "No email on homepage"
+    except:
+        return "Website Blocked/Offline"
+
+# --- 3. SCRAPER: GOOGLE MAPS TO WEBSITE ---
+def scrape_leads(niche, location, limit):
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
     driver = webdriver.Chrome(options=options)
-    stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", webgl_vendor="Intel Inc.", renderer="Intel Iris OpenGL Engine", fix_hairline=True)
-    
+    stealth(driver, languages=["en-US"], vendor="Google Inc.", platform="Win32")
+
     leads = []
     try:
-        query = f"{niche} in {location}".replace(" ", "+")
-        driver.get(f"https://www.google.com/maps/search/{query}")
+        search_url = f"https://www.google.com/maps/search/{niche}+in+{location}".replace(" ", "+")
+        driver.get(search_url)
         time.sleep(5)
-        
-        # SCROLL FIX: Scroll the side pane to load more than 4 results
-        try:
-            scroll_container = driver.find_element(By.XPATH, '//div[@role="feed"]')
-            for _ in range(3): 
-                scroll_container.send_keys(Keys.PAGE_DOWN)
-                time.sleep(2)
-        except:
-            pass 
 
-        elements = driver.find_elements(By.CLASS_NAME, "hfpxzc")
-        for e in elements[:limit]:
-            name = e.get_attribute("aria-label")
-            # RATINGS FIX: Get actual ratings from class MW4Y7c
-            try:
-                parent = e.find_element(By.XPATH, "./../../..")
-                rating = parent.find_element(By.CLASS_NAME, "MW4Y7c").text
-            except:
-                rating = "N/A"
+        # Scroll to load requested amount
+        pane = driver.find_element(By.XPATH, '//div[@role="feed"]')
+        for _ in range(2):
+            pane.send_keys(Keys.PAGE_DOWN)
+            time.sleep(2)
+
+        results = driver.find_elements(By.CLASS_NAME, "hfpxzc")
+        for res in results[:limit]:
+            name = res.get_attribute("aria-label")
+            # Click result to see details
+            res.click()
+            time.sleep(2)
             
-            leads.append({
-                "Business Name": name, 
-                "Location": location, 
-                "Rating": rating, 
-                "Email": "contact@verifiedpro.com"
-            })
+            # Look for website link
+            try:
+                website_elem = driver.find_element(By.CSS_SELECTOR, "a[aria-label*='website']")
+                website = website_elem.get_attribute("href")
+            except:
+                website = None
+            
+            leads.append({"Name": name, "Website": website})
     finally:
         driver.quit()
     return leads
 
-# --- UI LOGIC ---
-if 'leads' not in st.session_state: st.session_state['leads'] = []
+# --- 4. STREAMLIT UI ---
+st.title("🚀 Hunter Pro Lead Gen (2025 Edition)")
+niche = st.text_input("Business Type", "Dentists")
+loc = st.text_input("City", "New York")
+count = st.slider("Leads to Fetch", 5, 20, 10)
 
-with st.sidebar:
-    st.title("Main Menu")
-    page = st.radio("Navigate", ["Dashboard", "History"])
-
-if page == "Dashboard":
-    st.title("Outreach Dashboard")
-    c1, c2 = st.columns(2)
-    with c1:
-        n_in = st.text_input("Target Niche", placeholder="e.g. Cafes")
-        l_in = st.text_input("Location", placeholder="e.g. Guwahati")
-    with c2:
-        num_leads = st.slider("Lead Quantity", 5, 50, 10)
-        p_in = st.text_area("Pitch Instructions", placeholder="Describe your offer...")
-
-    if st.button("Initialize Hunter Machine"):
-        if n_in and l_in:
-            with st.spinner(f"Scraping {num_leads} leads..."):
-                st.session_state['leads'] = run_real_hunter(n_in, l_in, num_leads)
-                st.success("Targeting Complete.")
-
-    if st.session_state['leads']:
-        st.subheader("Lead Report Table")
-        st.table(pd.DataFrame(st.session_state['leads']))
+if st.button("Start Hunting"):
+    with st.spinner("Step 1: Scraping Google Maps for Websites..."):
+        raw_leads = scrape_leads(niche, loc, count)
         
-        for idx, lead in enumerate(st.session_state['leads']):
-            if st.button(f"Send AI Pitch to {lead['Business Name']}", key=f"p_{idx}"):
-                try:
-                    # THE 404 FIX: Use EXACT string "gemini-1.5-flash"
-                    response = client.models.generate_content(
-                        model="gemini-1.5-flash", 
-                        contents=f"Write a short professional pitch for {lead['Business Name']}. Context: {p_in}"
-                    )
-                    st.toast(f"Generated pitch for {lead['Business Name']}!")
-                    # Email logic follows here...
-                except Exception as e:
-                    st.error(f"API Error: {e}")
+    with st.spinner("Step 2: Crawling Websites for Emails..."):
+        final_data = []
+        for lead in raw_leads:
+            email = crawl_website_for_email(lead["Website"])
+            final_data.append({
+                "Business Name": lead["Name"],
+                "Website": lead["Website"],
+                "Email": email
+            })
+        
+        st.session_state['leads'] = final_data
+        st.success(f"Found {len(final_data)} leads!")
+
+if 'leads' in st.session_state:
+    df = pd.DataFrame(st.session_state['leads'])
+    st.dataframe(df)
+
+    # AI Pitching - FIXED 404 Logic
+    st.subheader("Draft Personalized Pitch")
+    target = st.selectbox("Select Business", df["Business Name"])
+    
+    if st.button("Generate AI Email"):
+        try:
+            # FIXED: Using 'gemini-2.5-flash' without 'models/' prefix
+            # This matches your CMD output rule for the new SDK
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=f"Write a 2-sentence cold email to {target} about their website."
+            )
+            st.info(response.text)
+        except Exception as e:
+            st.error(f"API Error: {e}")
