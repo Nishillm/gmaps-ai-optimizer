@@ -8,108 +8,100 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium_stealth import stealth
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
-# --- 1. INITIALIZATION ---
-st.set_page_config(page_title="Hunter Pro 2025", layout="wide")
+# --- UI & THEME ---
+st.set_page_config(page_title="Hunter Pro", layout="wide")
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; color: #e0e0e0; }
+    .stButton>button { background-color: #6a5acd; color: white; border-radius: 8px; }
+    </style>
+    """, unsafe_allow_index=True)
 
+# --- INITIALIZATION ---
 try:
-    # IMPORTANT: The new SDK (google-genai) automatically handles the endpoint
+    # Use clean API key initialization
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-except Exception as e:
-    st.error("Missing API Key in Streamlit Secrets!")
+except Exception:
+    st.error("Credential Error: Please check your Streamlit Secrets.")
 
-# --- 2. TOOL: THE EMAIL CRAWLER ---
-def crawl_website_for_email(url):
-    """Visits the business website to find hidden emails."""
-    if not url or "http" not in url:
-        return "No Website"
+# --- SCRAPER LOGIC ---
+def get_email_from_site(url):
+    """Crawls business website for email addresses."""
+    if not url or "http" not in url: return "N/A"
     try:
-        response = requests.get(url, timeout=8, headers={'User-Agent': 'Mozilla/5.0'})
-        # Search for email patterns using Regex
-        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', response.text)
-        return list(set(emails))[0] if emails else "No email on homepage"
-    except:
-        return "Website Blocked/Offline"
+        res = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
+        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res.text)
+        return emails[0] if emails else "No email found"
+    except: return "Connection failed"
 
-# --- 3. SCRAPER: GOOGLE MAPS TO WEBSITE ---
-def scrape_leads(niche, location, limit):
+def run_scraper(niche, location, limit):
     options = Options()
     options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
+    options.add_argument("--window-size=1920,1080") # Prevents element overlap
     driver = webdriver.Chrome(options=options)
-    stealth(driver, languages=["en-US"], vendor="Google Inc.", platform="Win32")
-
     leads = []
+
     try:
-        search_url = f"https://www.google.com/maps/search/{niche}+in+{location}".replace(" ", "+")
-        driver.get(search_url)
+        url = f"https://www.google.com/maps/search/{niche}+in+{location}".replace(" ", "+")
+        driver.get(url)
         time.sleep(5)
 
-        # Scroll to load requested amount
-        pane = driver.find_element(By.XPATH, '//div[@role="feed"]')
+        # Scroll loop to load more leads
+        feed = driver.find_element(By.XPATH, '//div[@role="feed"]')
         for _ in range(2):
-            pane.send_keys(Keys.PAGE_DOWN)
+            feed.send_keys(Keys.PAGE_DOWN)
             time.sleep(2)
 
         results = driver.find_elements(By.CLASS_NAME, "hfpxzc")
         for res in results[:limit]:
             name = res.get_attribute("aria-label")
-            # Click result to see details
-            res.click()
+            
+            # FIX: JS Click to avoid ElementClickInterceptedException
+            driver.execute_script("arguments[0].scrollIntoView(true);", res)
+            driver.execute_script("arguments[0].click();", res)
             time.sleep(2)
-            
-            # Look for website link
+
             try:
-                website_elem = driver.find_element(By.CSS_SELECTOR, "a[aria-label*='website']")
-                website = website_elem.get_attribute("href")
-            except:
-                website = None
-            
-            leads.append({"Name": name, "Website": website})
+                # Extract Website URL
+                web_elem = driver.find_element(By.CSS_SELECTOR, "a[aria-label*='website']")
+                website = web_elem.get_attribute("href")
+            except: website = None
+
+            leads.append({"Name": name, "Website": website or "N/A"})
     finally:
         driver.quit()
     return leads
 
-# --- 4. STREAMLIT UI ---
-st.title("🚀 Hunter Pro Lead Gen (2025 Edition)")
-niche = st.text_input("Business Type", "Dentists")
-loc = st.text_input("City", "New York")
-count = st.slider("Leads to Fetch", 5, 20, 10)
+# --- DASHBOARD UI ---
+st.title(" Lead Hunter Dashboard")
+col1, col2 = st.columns(2)
+with col1: niche = st.text_input("Niche", "Real Estate")
+with col2: loc = st.text_input("Location", "Miami")
+count = st.slider("Leads", 5, 20, 10)
 
-if st.button("Start Hunting"):
-    with st.spinner("Step 1: Scraping Google Maps for Websites..."):
-        raw_leads = scrape_leads(niche, loc, count)
-        
-    with st.spinner("Step 2: Crawling Websites for Emails..."):
-        final_data = []
-        for lead in raw_leads:
-            email = crawl_website_for_email(lead["Website"])
-            final_data.append({
-                "Business Name": lead["Name"],
-                "Website": lead["Website"],
-                "Email": email
-            })
-        
-        st.session_state['leads'] = final_data
-        st.success(f"Found {len(final_data)} leads!")
+if st.button("Start Extraction"):
+    with st.spinner("Hunting leads..."):
+        raw_data = run_scraper(niche, loc, count)
+        for lead in raw_data:
+            lead["Email"] = get_email_from_site(lead["Website"])
+        st.session_state['leads'] = raw_data
 
 if 'leads' in st.session_state:
     df = pd.DataFrame(st.session_state['leads'])
-    st.dataframe(df)
+    st.table(df)
 
-    # AI Pitching - FIXED 404 Logic
-    st.subheader("Draft Personalized Pitch")
-    target = st.selectbox("Select Business", df["Business Name"])
-    
-    if st.button("Generate AI Email"):
+    # FIXED AI CALL
+    if st.button("Generate AI Pitches"):
         try:
-            # FIXED: Using 'gemini-2.5-flash' without 'models/' prefix
-            # This matches your CMD output rule for the new SDK
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=f"Write a 2-sentence cold email to {target} about their website."
+            # FIX: Use clean ID 'gemini-2.5-flash' to avoid 404
+            res = client.models.generate_content(
+                model="gemini-2.5-flash", 
+                contents="Write a cold email for these businesses."
             )
-            st.info(response.text)
+            st.success("Drafts Ready!")
+            st.write(res.text)
         except Exception as e:
-            st.error(f"API Error: {e}")
+            st.error(f"404 Fix needed: Ensure model name is exactly 'gemini-2.5-flash'. Error: {e}")
