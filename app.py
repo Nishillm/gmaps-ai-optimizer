@@ -33,6 +33,7 @@ st.markdown("""
 if 'history' not in st.session_state: st.session_state['history'] = []
 if 'leads' not in st.session_state: st.session_state['leads'] = []
 
+# Fetch Secrets
 try:
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
     MY_EMAIL = st.secrets["MY_GMAIL"]
@@ -40,7 +41,7 @@ try:
 except:
     st.error("Credential Error: Check Streamlit Secrets.")
 
-# --- SCRAPER WITH SCROLL & DATA FIX ---
+# --- SCRAPER WITH SCROLL & RATING FIX ---
 def run_real_hunter(target_niche, target_location, limit):
     options = Options()
     options.add_argument("--headless")
@@ -55,19 +56,19 @@ def run_real_hunter(target_niche, target_location, limit):
         driver.get(f"https://www.google.com/maps/search/{query}")
         time.sleep(5)
         
-        # SCROLL FIX: Scroll to load more results to reach the 'limit'
+        # SCROLL LOGIC: Scroll the results pane to load more than 4 leads
         try:
-            scrollable_div = driver.find_element(By.XPATH, '//div[@role="feed"]')
-            for _ in range(3): # Perform scrolls to load more data
-                scrollable_div.send_keys(Keys.PAGE_DOWN)
-                time.sleep(1.5)
+            scroll_container = driver.find_element(By.XPATH, '//div[@role="feed"]')
+            for _ in range(3): 
+                scroll_container.send_keys(Keys.PAGE_DOWN)
+                time.sleep(2)
         except:
-            pass # Fallback if div structure differs
+            pass 
 
         elements = driver.find_elements(By.CLASS_NAME, "hfpxzc")
         for e in elements[:limit]:
             name = e.get_attribute("aria-label")
-            # RATING FIX: Target the specific rating class
+            # RATING EXTRACTION
             try:
                 parent = e.find_element(By.XPATH, "./../../..")
                 rating = parent.find_element(By.CLASS_NAME, "MW4Y7c").text
@@ -106,15 +107,16 @@ if page == "Dashboard":
             with st.spinner(f"Scraping {num_leads} leads..."):
                 results = run_real_hunter(n_in, l_in, num_leads)
                 st.session_state['leads'] = results
-                st.session_state['history'].append(f"Found {len(results)} {n_in}")
+                st.session_state['history'].append(f"Found {len(results)} {n_in} in {l_in}")
                 st.success(f"Complete! Found {len(results)} leads.")
         else:
             st.error("Please enter both Niche and Location.")
 
     if st.session_state['leads']:
+        st.subheader("Lead Report Table")
         st.table(pd.DataFrame(st.session_state['leads']))
         
-        # Word Report
+        # Word Report Generator
         doc = Document()
         doc.add_heading('Leads Report', 0)
         table = doc.add_table(rows=1, cols=4)
@@ -130,7 +132,7 @@ if page == "Dashboard":
         for idx, lead in enumerate(st.session_state['leads']):
             if st.button(f"Send AI Pitch to {lead['Business Name']}", key=f"p_{idx}"):
                 try:
-                    # API FIX: Removed 'models/' prefix to resolve 404
+                    # THE 404 FIX: Use exact string "gemini-1.5-flash"
                     res = client.models.generate_content(
                         model="gemini-1.5-flash", 
                         contents=f"Pitch to {lead['Business Name']}. Offer: {p_in}"
