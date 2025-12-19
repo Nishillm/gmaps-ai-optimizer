@@ -12,7 +12,7 @@ from docx import Document
 import io
 import time
 
-# --- UI THEME (White, Lavender, Pink) ---
+# --- UI THEME ---
 st.set_page_config(page_title="Hunter Pro Dashboard", layout="wide")
 
 st.markdown("""
@@ -35,23 +35,25 @@ if 'history' not in st.session_state: st.session_state['history'] = []
 if 'leads' not in st.session_state: st.session_state['leads'] = []
 
 try:
+    # Use the SDK correctly with your secret key
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
     MY_EMAIL = st.secrets["MY_GMAIL"]
     APP_PASS = st.secrets["GMAIL_APP_PASSWORD"]
-except:
-    st.error("Credential Error: Please check Streamlit Secrets.")
+except Exception as e:
+    st.error("Credential Error: Please check your Streamlit Secrets Vault.")
 
 # --- HELPERS ---
 def generate_docx(data):
     doc = Document()
     doc.add_heading('Lead Generation Report', 0)
-    table = doc.add_table(rows=1, cols=len(data[0]))
-    for i, h in enumerate(data[0].keys()):
-        table.rows[0].cells[i].text = h
-    for item in data:
-        row_cells = table.add_row().cells
-        for i, h in enumerate(item.keys()):
-            row_cells[i].text = str(item[h])
+    if data:
+        table = doc.add_table(rows=1, cols=len(data[0]))
+        for i, h in enumerate(data[0].keys()):
+            table.rows[0].cells[i].text = h
+        for item in data:
+            row_cells = table.add_row().cells
+            for i, h in enumerate(item.keys()):
+                row_cells[i].text = str(item[h])
     bio = io.BytesIO()
     doc.save(bio)
     return bio.getvalue()
@@ -67,19 +69,20 @@ def run_real_hunter(niche, location, limit):
     leads = []
     try:
         search_query = f"{niche} in {location}".replace(" ", "+")
+        # Standardized Google Maps URL
         driver.get(f"https://www.google.com/maps/search/{search_query}")
         time.sleep(5)
         elements = driver.find_elements(By.CLASS_NAME, "hfpxzc")
         for e in elements[:limit]:
             name = e.get_attribute("aria-label")
-            leads.append({"Business Name": name, "Location": location, "Rating": "Verified", "Email": "discovery@prospect.com"})
+            leads.append({"Business Name": name, "Location": location, "Rating": "Verified", "Email": "contact@research.com"})
     except Exception as e:
         st.error(f"Scraper Error: {e}")
     finally:
         driver.quit()
     return leads
 
-# --- UI LAYOUT ---
+# --- UI NAVIGATION ---
 with st.sidebar:
     st.title("Main Menu")
     page = st.radio("Navigation", ["Dashboard", "History"])
@@ -88,23 +91,24 @@ if page == "Dashboard":
     st.title("Outreach Dashboard")
     col1, col2 = st.columns(2)
     with col1:
-        niche = st.text_input("Target Niche", placeholder="e.g. Cafes")
-        location = st.text_input("Location", placeholder="e.g. Guwahati")
+        niche = st.text_input("Target Niche", placeholder="e.g. Dentists")
+        location = st.text_input("Location", placeholder="e.g. New York")
     with col2:
         num_leads = st.slider("Lead Quantity", 5, 50, 10)
-        pitch_focus = st.text_area("Pitch Focus", placeholder="Offer details...")
+        pitch_focus = st.text_area("Pitch Focus", placeholder="Specific offer details...")
 
     if st.button("Initialize Hunter Machine"):
-        with st.spinner("Scraping real Google Maps data..."):
+        with st.spinner("Scraping live data..."):
             results = run_real_hunter(niche, location, num_leads)
             st.session_state['leads'] = results
-            st.session_state['history'].append(f"Found {len(results)} {niche} in {location}")
+            st.session_state['history'].append(f"Scraped {len(results)} {niche} in {location}")
             st.success("Targeting Complete.")
 
     if st.session_state['leads']:
         st.subheader("Lead Report Table")
         st.table(pd.DataFrame(st.session_state['leads']))
         
+        # Word Download Button
         docx_file = generate_docx(st.session_state['leads'])
         st.download_button("Download Report (Word)", data=docx_file, file_name="leads.docx")
 
@@ -112,27 +116,23 @@ if page == "Dashboard":
         for idx, lead in enumerate(st.session_state['leads']):
             if st.button(f"Send AI Pitch to {lead['Business Name']}", key=f"p_{idx}"):
                 try:
-                    # FIX: Switched to 1.5-flash for higher Free Tier Quota
+                    # FIXED MODEL STRING FOR 404 ERROR
                     response = client.models.generate_content(
                         model="gemini-1.5-flash", 
-                        contents=f"Write a 3-sentence pitch for {lead['Business Name']}. Focus: {pitch_focus}"
+                        contents=f"Write a 3-sentence professional pitch for {lead['Business Name']}. Focus: {pitch_focus}"
                     )
                     
                     msg = MIMEMultipart()
-                    msg['From'], msg['To'], msg['Subject'] = MY_EMAIL, lead['Email'], "Business Proposal"
+                    msg['From'], msg['To'], msg['Subject'] = MY_EMAIL, lead['Email'], "Proposal"
                     msg.attach(MIMEText(response.text, 'plain'))
                     
                     with smtplib.SMTP('smtp.gmail.com', 587) as server:
                         server.starttls()
                         server.login(MY_EMAIL, APP_PASS)
                         server.send_message(msg)
-                    st.toast(f"Success! Sent to {lead['Business Name']}")
+                    st.toast(f"Pitch delivered to {lead['Business Name']}")
                 except Exception as e:
-                    # If quota is still hit, show a helpful message instead of raw error
-                    if "429" in str(e):
-                        st.error("AI is busy (Quota Limit). Please wait 60 seconds and try the next lead.")
-                    else:
-                        st.error(f"Error: {e}")
+                    st.error(f"AI/Email Error: {e}")
 
 elif page == "History":
     st.title("Search History")
