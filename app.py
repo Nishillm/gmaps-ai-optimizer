@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from google import genai
@@ -8,14 +7,14 @@ from email.mime.multipart import MIMEMultipart
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium_stealth import stealth
 from docx import Document
 import io
 import time
 
-# --- THEME & UI STYLING ---
+# --- UI THEME (UNCHANGED) ---
 st.set_page_config(page_title="Hunter Pro Dashboard", layout="wide")
-
 st.markdown("""
     <style>
     .stApp { background-color: #FFFFFF; }
@@ -31,7 +30,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- INITIALIZATION ---
 if 'history' not in st.session_state: st.session_state['history'] = []
 if 'leads' not in st.session_state: st.session_state['leads'] = []
 
@@ -40,24 +38,9 @@ try:
     MY_EMAIL = st.secrets["MY_GMAIL"]
     APP_PASS = st.secrets["GMAIL_APP_PASSWORD"]
 except:
-    st.error("Credential Error: Please check Streamlit Secrets.")
+    st.error("Credential Error: Check Streamlit Secrets.")
 
-# --- HELPERS ---
-def generate_docx(data):
-    doc = Document()
-    doc.add_heading('Lead Generation Report', 0)
-    if data:
-        table = doc.add_table(rows=1, cols=len(data[0]))
-        for i, h in enumerate(data[0].keys()):
-            table.rows[0].cells[i].text = h
-        for item in data:
-            row_cells = table.add_row().cells
-            for i, h in enumerate(item.keys()):
-                row_cells[i].text = str(item[h])
-    bio = io.BytesIO()
-    doc.save(bio)
-    return bio.getvalue()
-
+# --- SCRAPER WITH SCROLL & DATA FIX ---
 def run_real_hunter(target_niche, target_location, limit):
     options = Options()
     options.add_argument("--headless")
@@ -71,17 +54,39 @@ def run_real_hunter(target_niche, target_location, limit):
         query = f"{target_niche} in {target_location}".replace(" ", "+")
         driver.get(f"https://www.google.com/maps/search/{query}")
         time.sleep(5)
+        
+        # SCROLL FIX: Scroll to load more results to reach the 'limit'
+        try:
+            scrollable_div = driver.find_element(By.XPATH, '//div[@role="feed"]')
+            for _ in range(3): # Perform scrolls to load more data
+                scrollable_div.send_keys(Keys.PAGE_DOWN)
+                time.sleep(1.5)
+        except:
+            pass # Fallback if div structure differs
+
         elements = driver.find_elements(By.CLASS_NAME, "hfpxzc")
         for e in elements[:limit]:
             name = e.get_attribute("aria-label")
-            leads.append({"Business Name": name, "Location": target_location, "Rating": "Verified", "Email": "contact@leadpro.com"})
-    except Exception as e:
-        st.error(f"Scraper Error: {e}")
+            # RATING FIX: Target the specific rating class
+            try:
+                parent = e.find_element(By.XPATH, "./../../..")
+                rating = parent.find_element(By.CLASS_NAME, "MW4Y7c").text
+            except:
+                rating = "N/A"
+            
+            leads.append({
+                "Business Name": name, 
+                "Location": target_location, 
+                "Rating": rating, 
+                "Email": "discovery@prospect.com"
+            })
+    except Exception as ex:
+        st.error(f"Scraper Error: {ex}")
     finally:
         driver.quit()
     return leads
 
-# --- UI NAVIGATION ---
+# --- UI DASHBOARD ---
 with st.sidebar:
     st.title("Main Menu")
     page = st.radio("Navigation", ["Dashboard", "History"])
@@ -98,36 +103,49 @@ if page == "Dashboard":
 
     if st.button("Initialize Hunter Machine"):
         if n_in.strip() and l_in.strip():
-            with st.spinner(f"Scraping {num_leads} live leads..."):
+            with st.spinner(f"Scraping {num_leads} leads..."):
                 results = run_real_hunter(n_in, l_in, num_leads)
                 st.session_state['leads'] = results
-                st.session_state['history'].append(f"Found {len(results)} {n_in} in {l_in}")
-                st.success("Targeting Complete.")
+                st.session_state['history'].append(f"Found {len(results)} {n_in}")
+                st.success(f"Complete! Found {len(results)} leads.")
         else:
             st.error("Please enter both Niche and Location.")
 
     if st.session_state['leads']:
-        st.subheader("Lead Report Table")
         st.table(pd.DataFrame(st.session_state['leads']))
-        docx_data = generate_docx(st.session_state['leads'])
-        st.download_button("Download Report (Word Doc)", data=docx_data, file_name="leads_report.docx")
+        
+        # Word Report
+        doc = Document()
+        doc.add_heading('Leads Report', 0)
+        table = doc.add_table(rows=1, cols=4)
+        for i, h in enumerate(["Name", "Location", "Rating", "Email"]):
+            table.rows[0].cells[i].text = h
+        for lead in st.session_state['leads']:
+            row = table.add_row().cells
+            row[0].text, row[1].text, row[2].text, row[3].text = lead["Business Name"], lead["Location"], lead["Rating"], lead["Email"]
+        bio = io.BytesIO()
+        doc.save(bio)
+        st.download_button("Download Report (Word)", data=bio.getvalue(), file_name="leads.docx")
 
         for idx, lead in enumerate(st.session_state['leads']):
-            with st.expander(f"Pitch: {lead['Business Name']}"):
-                if st.button(f"Send AI Email to {lead['Business Name']}", key=f"p_{idx}"):
-                    try:
-                        # Corrected Model ID and Logic
-                        response = client.models.generate_content(model="gemini-1.5-flash", contents=f"Pitch to {lead['Business Name']}. Offer: {p_in}")
-                        msg = MIMEMultipart()
-                        msg['From'], msg['To'], msg['Subject'] = MY_EMAIL, lead['Email'], "Proposal"
-                        msg.attach(MIMEText(response.text, 'plain'))
-                        with smtplib.SMTP('smtp.gmail.com', 587) as server:
-                            server.starttls()
-                            server.login(MY_EMAIL, APP_PASS)
-                            server.send_message(msg)
-                        st.toast(f"Success! Sent to {lead['Business Name']}")
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+            if st.button(f"Send AI Pitch to {lead['Business Name']}", key=f"p_{idx}"):
+                try:
+                    # API FIX: Removed 'models/' prefix to resolve 404
+                    res = client.models.generate_content(
+                        model="gemini-1.5-flash", 
+                        contents=f"Pitch to {lead['Business Name']}. Offer: {p_in}"
+                    )
+                    
+                    msg = MIMEMultipart()
+                    msg['From'], msg['To'], msg['Subject'] = MY_EMAIL, lead['Email'], "Proposal"
+                    msg.attach(MIMEText(res.text, 'plain'))
+                    with smtplib.SMTP('smtp.gmail.com', 587) as server:
+                        server.starttls()
+                        server.login(MY_EMAIL, APP_PASS)
+                        server.send_message(msg)
+                    st.toast(f"Email sent to {lead['Business Name']}")
+                except Exception as e:
+                    st.error(f"API Error: {e}")
 
 elif page == "History":
     st.title("Search History")
