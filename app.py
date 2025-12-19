@@ -4,122 +4,96 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- THEME & STYLING (White & Lavender) ---
+# --- THEME & STYLING (White, Lavender, Light Pink) ---
 st.set_page_config(page_title="Lead Hunter Pro", layout="wide")
 
 st.markdown("""
     <style>
-    /* Main background and text colors */
-    .stApp {
-        background-color: #FFFFFF;
-    }
-    /* Sidebar styling */
+    /* Main Background */
+    .stApp { background-color: #FFFFFF; }
+    
+    /* Sidebar Styling (Light Pink) */
     [data-testid="stSidebar"] {
-        background-color: #F3E5F5; /* Light Lavender */
+        background-color: #FCE4EC !important;
+        color: #000000 !important;
     }
-    /* Primary Button styling */
+    
+    /* Input Boxes (Lavender Background, Black Text, White Typing) */
+    div[data-baseweb="input"] > div, div[data-baseweb="textarea"] > div {
+        background-color: #E1BEE7 !important; /* Lavender */
+        border-radius: 4px !important;
+    }
+    input, textarea {
+        color: #000000 !important; /* Text inside box is black */
+    }
+    /* Change text to white ONLY when typing/active to ensure visibility as requested */
+    input:focus, textarea:focus {
+        color: #FFFFFF !important; 
+    }
+
+    /* Labels and Headers (Professional Black) */
+    label, p, h1, h2, h3 { color: #000000 !important; font-family: 'Arial', sans-serif; }
+
+    /* Buttons */
     .stButton>button {
-        background-color: #9575CD; /* Deep Lavender */
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 10px 24px;
-        transition: 0.3s;
-    }
-    .stButton>button:hover {
-        background-color: #7E57C2;
-        border: none;
-        color: white;
-    }
-    /* Input field styling */
-    .stTextInput>div>div>input, .stTextArea>div>textarea {
-        border-radius: 8px;
-        border: 1px solid #D1C4E9;
-    }
-    /* Headers */
-    h1, h2, h3 {
-        color: #4527A0;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #9575CD; color: white;
+        border-radius: 4px; border: none; padding: 0.5rem 1rem;
     }
     </style>
     """, unsafe_allow_html=True)
 
 # --- AUTHENTICATION ---
-# Ensure these are in your Streamlit Secrets!
 try:
+    # Probable Fix: Ensure model name is 'gemini-1.5-flash' if 2.0-flash triggers ClientError
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
     MY_EMAIL = st.secrets["MY_GMAIL"]
     APP_PASS = st.secrets["GMAIL_APP_PASSWORD"]
-except:
-    st.error("Credentials missing in Secrets Vault.")
+except Exception as e:
+    st.error("Missing Credentials. Please check your Streamlit Secrets.")
 
-# --- SIDEBAR NAVIGATION ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.title("⚙️ Lead Hunter")
-    st.markdown("---")
-    menu = st.radio("Navigation", ["Dashboard", "Campaign History", "Settings"])
-    st.markdown("---")
-    st.info("Status: System Active")
+    st.markdown("### Menu")
+    st.write("Settings")
+    st.write("History")
 
 # --- MAIN INTERACTIVE UI ---
 st.title("Outreach Dashboard")
-st.write("Find and connect with local businesses using AI-driven research.")
 
-# Interactive Search Bars
-with st.container():
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        st.write("🔍 **Targeting**")
-        niche = st.text_input("Business Niche", placeholder="e.g. Luxury Spas")
-        city = st.text_input("Location", placeholder="e.g. Beverly Hills, CA")
-    
-    with col2:
-        st.write("📝 **Instructions**")
-        pitch_details = st.text_area(
-            "AI Pitch Focus", 
-            placeholder="e.g. Focus on their Google Maps ranking. Offer a free 15-min audit.",
-            height=110
-        )
+col1, col2 = st.columns(2)
+with col1:
+    niche = st.text_input("Target Niche", placeholder="e.g. Dentists")
+    location = st.text_input("Location", placeholder="e.g. London")
 
-# Action Bar
-st.markdown("---")
-if st.button("Initialize Search", use_container_width=True):
-    with st.spinner("Scanning Google Maps data..."):
-        # Placeholder for your Selenium Hunter Logic
-        st.session_state['leads'] = [
-            {"name": "Elite Wellness", "email": "hello@elitewell.com", "rating": 3.9},
-            {"name": "Glow Skin Clinic", "email": "contact@glowskin.com", "rating": 4.2}
-        ]
-        st.success(f"Successfully identified {len(st.session_state['leads'])} target prospects.")
+with col2:
+    pitch_focus = st.text_area("Pitch Focus", placeholder="Mention their reviews...", height=100)
 
-# --- RESULTS TABLE ---
+if st.button("Generate Leads", use_container_width=True):
+    # Simulated lead for testing
+    st.session_state['leads'] = [{"name": "Smile Clinic", "email": "info@example.com", "rating": 4.2}]
+    st.success("Analysis complete.")
+
+# --- RESULTS ---
 if 'leads' in st.session_state:
-    st.subheader("Prospect Analysis")
-    
-    # Header Row
-    head_col1, head_col2, head_col3 = st.columns([2, 1, 1])
-    head_col1.write("**Business Name**")
-    head_col2.write("**Rating**")
-    head_col3.write("**Action**")
-    
     for lead in st.session_state['leads']:
-        with st.expander(f"📍 {lead['name']}"):
-            c1, c2 = st.columns([3, 1])
-            c1.write(f"The AI will generate a custom pitch based on the rating of **{lead['rating']}** stars.")
-            
-            if c2.button("✉️ Send Pitch", key=lead['name']):
-                # AI Logic
-                prompt = f"Write a professional email to {lead['name']} regarding their {lead['rating']} star rating. {pitch_details}"
-                response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-                
-                # Email Logic
-                msg = MIMEMultipart()
-                msg['From'], msg['To'], msg['Subject'] = MY_EMAIL, lead['email'], "Business Growth Inquiry"
-                msg.attach(MIMEText(response.text, 'plain'))
-                
-                with smtplib.SMTP('smtp.gmail.com', 587) as server:
-                    server.starttls()
-                    server.login(MY_EMAIL, APP_PASS)
-                    server.send_message(msg)
-                
-                st.toast(f"Email delivered to {lead['name']}!")
+        with st.container():
+            st.markdown(f"**Lead:** {lead['name']} | **Rating:** {lead['rating']}")
+            if st.button(f"Send Pitch to {lead['name']}"):
+                try:
+                    # FIX: Using 'gemini-1.5-flash' is often safer if 2.0-flash-exp fails
+                    response = client.models.generate_content(
+                        model="gemini-1.5-flash", 
+                        contents=f"Write a 3-sentence pitch for {lead['name']}. Focus: {pitch_focus}"
+                    )
+                    
+                    msg = MIMEMultipart()
+                    msg['From'], msg['To'], msg['Subject'] = MY_EMAIL, lead['email'], "Improvement Opportunity"
+                    msg.attach(MIMEText(response.text, 'plain'))
+                    
+                    with smtplib.SMTP('smtp.gmail.com', 587) as server:
+                        server.starttls()
+                        server.login(MY_EMAIL, APP_PASS)
+                        server.send_message(msg)
+                    st.toast("Pitch sent successfully.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
