@@ -1,99 +1,139 @@
 import streamlit as st
+import pandas as pd
 from google import genai
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- THEME & STYLING (White, Lavender, Light Pink) ---
-st.set_page_config(page_title="Lead Hunter Pro", layout="wide")
+# --- THEME & UI STYLING ---
+st.set_page_config(page_title="Hunter Pro Dashboard", layout="wide")
 
 st.markdown("""
     <style>
-    /* Main Background */
+    /* Main Background White */
     .stApp { background-color: #FFFFFF; }
     
-    /* Sidebar Styling (Light Pink) */
-    [data-testid="stSidebar"] {
-        background-color: #FCE4EC !important;
+    /* Sidebar Light Pink with Black Text */
+    [data-testid="stSidebar"] { 
+        background-color: #FCE4EC !important; 
         color: #000000 !important;
     }
     
-    /* Input Boxes (Lavender Background, Black Text, White Typing) */
+    /* Input Boxes: Lavender BG, Black Text, White Typing */
     div[data-baseweb="input"] > div, div[data-baseweb="textarea"] > div {
-        background-color: #E1BEE7 !important; /* Lavender */
-        border-radius: 4px !important;
+        background-color: #E1BEE7 !important;
+        border-radius: 8px !important;
     }
-    input, textarea {
-        color: #000000 !important; /* Text inside box is black */
+    input, textarea { 
+        color: #000000 !important; 
+        font-weight: 500;
     }
-    /* Change text to white ONLY when typing/active to ensure visibility as requested */
-    input:focus, textarea:focus {
+    input:focus, textarea:focus { 
         color: #FFFFFF !important; 
     }
 
-    /* Labels and Headers (Professional Black) */
-    label, p, h1, h2, h3 { color: #000000 !important; font-family: 'Arial', sans-serif; }
+    /* All Labels and Headers forced to Black */
+    label, p, h1, h2, h3, .stMarkdown { 
+        color: #000000 !important; 
+        font-family: 'Segoe UI', Arial, sans-serif;
+    }
 
-    /* Buttons */
+    /* Professional Buttons */
     .stButton>button {
         background-color: #9575CD; color: white;
-        border-radius: 4px; border: none; padding: 0.5rem 1rem;
+        border-radius: 8px; border: none; padding: 12px;
+        width: 100%;
     }
+    .stButton>button:hover { background-color: #7E57C2; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- AUTHENTICATION ---
+# --- INITIALIZE SYSTEM ---
+if 'history' not in st.session_state: st.session_state['history'] = []
+if 'leads' not in st.session_state: st.session_state['leads'] = []
+
 try:
-    # Probable Fix: Ensure model name is 'gemini-1.5-flash' if 2.0-flash triggers ClientError
+    # Initializing with modern SDK
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
     MY_EMAIL = st.secrets["MY_GMAIL"]
     APP_PASS = st.secrets["GMAIL_APP_PASSWORD"]
-except Exception as e:
-    st.error("Missing Credentials. Please check your Streamlit Secrets.")
+except:
+    st.error("Setup Error: Please verify your API keys in Streamlit Secrets.")
 
-# --- SIDEBAR ---
+# --- SIDEBAR NAVIGATION ---
 with st.sidebar:
-    st.markdown("### Menu")
-    st.write("Settings")
-    st.write("History")
+    st.title("Main Menu")
+    page = st.radio("Navigation", ["Dashboard", "History"])
+    st.markdown("---")
+    st.write("System Status: Active")
 
-# --- MAIN INTERACTIVE UI ---
-st.title("Outreach Dashboard")
+# --- DASHBOARD PAGE ---
+if page == "Dashboard":
+    st.title("Outreach Dashboard")
+    
+    # User Control Inputs
+    col1, col2 = st.columns(2)
+    with col1:
+        niche = st.text_input("Target Niche", placeholder="Type business type...")
+        location = st.text_input("Location", placeholder="Type city/country...")
+    with col2:
+        num_leads = st.slider("Lead Quantity", 5, 50, 10)
+        pitch_focus = st.text_area("Pitch Instructions", placeholder="Describe your offer details...")
 
-col1, col2 = st.columns(2)
-with col1:
-    niche = st.text_input("Target Niche", placeholder="e.g. Dentists")
-    location = st.text_input("Location", placeholder="e.g. London")
+    if st.button("Initialize Hunter Machine"):
+        with st.spinner(f"Fetching {num_leads} leads for {niche}..."):
+            # Simulation of Selenium Hunter using your dynamic inputs
+            leads_data = []
+            for i in range(num_leads):
+                leads_data.append({
+                    "Business Name": f"{niche} Specialist {i+1}",
+                    "Location": location,
+                    "Rating": round(3.5 + (i * 0.1), 1),
+                    "Email": f"contact{i}@example.com"
+                })
+            st.session_state['leads'] = leads_data
+            # Save to History
+            st.session_state['history'].append(f"Found {num_leads} {niche} in {location}")
+            st.success("Targeting Complete.")
 
-with col2:
-    pitch_focus = st.text_area("Pitch Focus", placeholder="Mention their reviews...", height=100)
+    # --- PROFESSIONAL LEAD REPORT TABLE ---
+    if st.session_state['leads']:
+        st.subheader("Lead Report Table")
+        df = pd.DataFrame(st.session_state['leads'])
+        st.table(df) # Structured ordered display
 
-if st.button("Generate Leads", use_container_width=True):
-    # Simulated lead for testing
-    st.session_state['leads'] = [{"name": "Smile Clinic", "email": "info@example.com", "rating": 4.2}]
-    st.success("Analysis complete.")
+        # Action Buttons for each lead
+        st.markdown("### Individual Outreach")
+        for idx, lead in enumerate(st.session_state['leads']):
+            with st.expander(f"Action: {lead['Business Name']}"):
+                if st.button(f"Send AI Pitch to {lead['Business Name']}", key=f"pitch_{idx}"):
+                    try:
+                        # FIXED: Using stable model identifier to prevent 404
+                        # Removed "models/" prefix as required by new SDK
+                        response = client.models.generate_content(
+                            model="gemini-2.0-flash-001", 
+                            contents=f"Write a 4-sentence pitch for {lead['Business Name']}. Use these details: {pitch_focus}"
+                        )
+                        
+                        # Gmail Logic
+                        msg = MIMEMultipart()
+                        msg['From'], msg['To'], msg['Subject'] = MY_EMAIL, lead['Email'], "Growth Opportunity"
+                        msg.attach(MIMEText(response.text, 'plain'))
+                        
+                        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+                            server.starttls()
+                            server.login(MY_EMAIL, APP_PASS)
+                            server.send_message(msg)
+                        
+                        st.toast(f"Successfully pitched {lead['Business Name']}")
+                    except Exception as e:
+                        st.error(f"Logic Error: {e}")
 
-# --- RESULTS ---
-if 'leads' in st.session_state:
-    for lead in st.session_state['leads']:
-        with st.container():
-            st.markdown(f"**Lead:** {lead['name']} | **Rating:** {lead['rating']}")
-            if st.button(f"Send Pitch to {lead['name']}"):
-                try:
-                    # FIX: Using 'gemini-1.5-flash' is often safer if 2.0-flash-exp fails
-                    response = client.models.generate_content(
-                        model="gemini-1.5-flash", 
-                        contents=f"Write a 3-sentence pitch for {lead['name']}. Focus: {pitch_focus}"
-                    )
-                    
-                    msg = MIMEMultipart()
-                    msg['From'], msg['To'], msg['Subject'] = MY_EMAIL, lead['email'], "Improvement Opportunity"
-                    msg.attach(MIMEText(response.text, 'plain'))
-                    
-                    with smtplib.SMTP('smtp.gmail.com', 587) as server:
-                        server.starttls()
-                        server.login(MY_EMAIL, APP_PASS)
-                        server.send_message(msg)
-                    st.toast("Pitch sent successfully.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+# --- HISTORY PAGE ---
+elif page == "History":
+    st.title("Past Activity")
+    if st.session_state['history']:
+        for record in reversed(st.session_state['history']):
+            st.write(f"• {record}")
+    else:
+        st.info("No records found.")
