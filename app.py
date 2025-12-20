@@ -47,7 +47,6 @@ def send_personalized_email(target_email, subject, body):
         return False
 
 try:
-    # Using the Client initialization that worked in your older version
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 except Exception as e:
     st.error("Credential Error: Please check your Streamlit Secrets.")
@@ -64,7 +63,7 @@ def deep_scrape_business(url, business_name):
         return f"Audit for {business_name}: " + (", ".join(analysis) if analysis else "Standard site.")
     except: return "Audit limited: Website unreachable."
 
-# --- 4. STEALTH SCRAPER (Fixed Stale Error) ---
+# --- 4. STEALTH SCRAPER ---
 def run_stealth_hunter(niche, location, limit):
     options = Options()
     options.add_argument("--headless")
@@ -80,7 +79,6 @@ def run_stealth_hunter(niche, location, limit):
         driver.get(f"https://www.google.com/maps/search/{query}")
         time.sleep(6)
         
-        # Fresh search for feed and scrolling
         try:
             feed = driver.find_element(By.XPATH, '//div[@role="feed"]')
             for _ in range(2):
@@ -88,10 +86,8 @@ def run_stealth_hunter(niche, location, limit):
                 time.sleep(2)
         except: pass
 
-        # Index-based loop to prevent StaleElementReferenceException
         for i in range(limit):
             try:
-                # Re-find results inside the loop for stability
                 results = driver.find_elements(By.CLASS_NAME, "hfpxzc")
                 if i >= len(results): break
                 
@@ -147,20 +143,37 @@ if 'leads_list' in st.session_state:
                         # 2. Audit Analysis
                         audit_results = deep_scrape_business(lead['Website'], lead['Name'])
                         
-                        # 3. AI Generation (Using the prompt format from your working version)
+                        # 3. AI Pitch Generation with Fallback & Wait Logic
                         try:
-                            # Use the exact model name from your working snippet
-                            # and ensure contents is passed clearly
-                            ai_response = client.models.generate_content(
-                                model="gemini-2.0-flash",
-                                contents=f"Draft a short pitch for {lead['Name']} in {location}. Focus on these audit findings: {audit_results}. My offer is {service}. Mention I'll do 10% demo work for free."
-                            )
+                            prompt_text = f"Draft a short pitch for {lead['Name']} in {location}. Focus on these audit findings: {audit_results}. My offer is {service}. Mention I'll do 10% demo work for free."
+                            
+                            try:
+                                # Attempt with 2.0 first
+                                ai_response = client.models.generate_content(
+                                    model="gemini-2.0-flash",
+                                    contents=prompt_text
+                                )
+                            except Exception as e:
+                                if "429" in str(e):
+                                    st.warning("Gemini 2.0 Busy... Switching to 1.5 Flash (Higher Quota)")
+                                    # FALLBACK to 1.5 Flash
+                                    ai_response = client.models.generate_content(
+                                        model="gemini-1.5-flash",
+                                        contents=prompt_text
+                                    )
+                                else:
+                                    raise e
+
                             pitch_text = ai_response.text
                             
                             # 4. Automatic Send
-                            if send_personalized_email(email, f"Business Audit: {lead['Name']}", pitch_text):
+                            if send_personalized_email(email, f"Business Audit for {lead['Name']}", pitch_text):
                                 st.success(f"Email sent to {email}!")
                                 st.info(f"Pitch Content: {pitch_text[:150]}...")
+                                
                         except Exception as ai_e:
-                            st.error(f"Gemini Error: {ai_e}")
+                            if "429" in str(ai_e):
+                                st.error("AI is temporarily exhausted. Please wait 60 seconds before clicking the next lead.")
+                            else:
+                                st.error(f"AI Error: {ai_e}")
         st.divider()
